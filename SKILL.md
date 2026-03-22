@@ -3,7 +3,7 @@ name: housing-price-data
 description: 'Fetch official Chinese 70-city residential property price index data from the National Bureau of Statistics (国家统计局). Use when users ask about 房价指数, housing trends, 环比, 同比, 定基, 新建商品住宅, 二手住宅, or recent housing price movement for any of the 70 major cities such as 北京, 上海, 广州, 深圳, 武汉.'
 metadata:
   author: jiangshengcheng
-  version: "2.2"
+  version: "2.2.3"
 ---
 
 # 中国70城住宅价格指数数据技能
