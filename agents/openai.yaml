@@ -1,4 +1,4 @@
 interface:
   display_name: "China Housing Market Analysis"
-  short_description: "Multi-source monthly China housing market data and analysis"
-  default_prompt: "Use $monthly-china-housing-market-analysis to run the weekly multi-source China housing market analysis."
+  short_description: "Multi-source China housing market data and analysis"
+  default_prompt: "Use $china-housing-market-analysis to run the weekly multi-source China housing market analysis."

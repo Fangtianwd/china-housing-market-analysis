@@ -1,10 +1,10 @@
 ---
-name: monthly-china-housing-market-analysis
+name: china-housing-market-analysis
 description: 每周拉取多源中国楼市数据（国家统计局+央行+住建部+国务院政策）并生成多形式交互式中文分析报告
 metadata:
   author: jiangshengcheng
-  version: "3.0.0"
-  origin: 迁移自 coWork 同名 skill（2026-08-10 版），与本仓库旧版 housing-price-data（v2.2.x）抓取脚本合并维护
+  version: "3.0.1"
+  origin: 迁移自 coWork skill monthly-china-housing-market-analysis（2026-08-10 版）；coWork 侧副本已停止维护，本仓库为唯一维护地
 ---
 
 每周从多个官方数据源拉取中国楼市相关数据，做多源交叉验证，最终生成丰富、直观、多种形式的中文分析报告。历史数据尽量久、尽量全，维度尽量宽。

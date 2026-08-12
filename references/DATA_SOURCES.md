@@ -6,7 +6,7 @@ metadata:
   origin: coWork memory housing_data_sources.md（session 30572765-78ff-4975-b271-437e41f7ad23），2026-08-10 验证
 ---
 
-月度楼市分析任务（skill `monthly-china-housing-market-analysis`）使用的多源数据源清单。
+楼市分析任务（skill `china-housing-market-analysis`）使用的多源数据源清单。
 每次运行后如验证了新的源、发现新的失败模式或兜底方式，应更新本文件。
 
 主源：
