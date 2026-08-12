@@ -1,6 +1,7 @@
 import sys
 import unittest
 from pathlib import Path
+from unittest import mock
 
 SCRIPTS_DIR = Path(__file__).resolve().parents[1] / "scripts"
 if str(SCRIPTS_DIR) not in sys.path:
@@ -8,6 +9,7 @@ if str(SCRIPTS_DIR) not in sys.path:
 
 import fetch_data  # noqa: E402
 from config import INDICATORS  # noqa: E402
+from exceptions import NetworkError  # noqa: E402
 
 
 SAMPLE_HTML = """
@@ -37,11 +39,13 @@ SAMPLE_HTML = """
 """.encode("utf-8")
 
 
+@unittest.skipUnless(fetch_data.DEPS_AVAILABLE, fetch_data.DEPS_ERROR or "缺少依赖")
 class FetchDataTests(unittest.TestCase):
     def test_normalize_metric_name(self):
         self.assertEqual(fetch_data.normalize_metric_name("MoM"), "环比")
         self.assertEqual(fetch_data.normalize_metric_name("同比指数"), "同比")
         self.assertEqual(fetch_data.normalize_metric_name("fixed-base"), "定基")
+        self.assertEqual(fetch_data.normalize_metric_name("1-6月平均"), "累计平均")
         self.assertIsNone(fetch_data.normalize_metric_name("unknown"))
 
     def test_normalize_city_name(self):
@@ -100,6 +104,34 @@ class FetchDataTests(unittest.TestCase):
         self.assertEqual(chart_data["series"][INDICATORS["used"]]["同比"], [None, 98.8])
         self.assertAlmostEqual(chart_data["gap"][1], 1.7)
         self.assertIsNone(chart_data["gap"][0])
+
+
+@unittest.skipUnless(fetch_data.DEPS_AVAILABLE, fetch_data.DEPS_ERROR or "缺少依赖")
+class FetchUrlRetryTests(unittest.TestCase):
+    def _http_error(self, status_code: int):
+        error = Exception(f"{status_code} Client Error")
+        response = mock.Mock()
+        response.status_code = status_code
+        error.response = response
+        return error
+
+    def test_fetch_url_4xx_fails_fast_without_retry(self):
+        with mock.patch.object(fetch_data, "_cache", None):
+            with mock.patch("requests.get", side_effect=self._http_error(404)) as get_mock:
+                with self.assertRaises(NetworkError) as ctx:
+                    fetch_data.fetch_url("https://example.com/missing")
+
+        self.assertEqual(get_mock.call_count, 1)
+        self.assertEqual(ctx.exception.status_code, 404)
+
+    def test_fetch_url_retries_on_5xx(self):
+        with mock.patch.object(fetch_data, "_cache", None):
+            with mock.patch("requests.get", side_effect=self._http_error(500)) as get_mock:
+                with mock.patch("time.sleep"):
+                    with self.assertRaises(NetworkError):
+                        fetch_data.fetch_url("https://example.com/error")
+
+        self.assertEqual(get_mock.call_count, fetch_data.REQUEST_CONFIG["max_attempts"])
 
 
 if __name__ == "__main__":

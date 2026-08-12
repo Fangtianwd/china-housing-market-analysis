@@ -42,6 +42,7 @@ SAMPLE_HTML = """
 """.encode("utf-8")
 
 
+@unittest.skipUnless(validate_full_data.DEPS_AVAILABLE, validate_full_data.DEPS_ERROR or "缺少依赖")
 class ValidateFullDataTests(unittest.TestCase):
     def test_split_row_segments_handles_multi_city_header(self):
         header = ["城市", "环比", "同比", "城市", "环比", "同比"]

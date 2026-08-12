@@ -20,13 +20,20 @@ from typing import Dict, List, Optional, Tuple
 try:
     import requests
     from bs4 import BeautifulSoup
-except ImportError:
-    print(json.dumps({"error": "缺少依赖包，请运行: pip install -r requirements.txt"}, ensure_ascii=False))
-    sys.exit(1)
+
+    DEPS_AVAILABLE = True
+    DEPS_ERROR = None
+except ImportError as _exc:  # pragma: no cover - 依赖缺失环境
+    requests = None
+    BeautifulSoup = None
+    DEPS_AVAILABLE = False
+    DEPS_ERROR = f"缺少依赖包（{_exc}），请运行: pip install -r requirements.txt"
 
 from cache import SimpleCache
 from config import (
+    AREA_SEGMENTS,
     CACHE_CONFIG,
+    CATEGORY_METRIC_SEPARATOR,
     CITY_ALIASES,
     DEFAULTS,
     INDICATORS,
@@ -45,10 +52,14 @@ _cache = SimpleCache(
 ) if CACHE_CONFIG["enabled"] else None
 
 PERIOD_RE = re.compile(r"(\d{4})\s*年\s*(\d{1,2})\s*月(?:份)?")
+CUMULATIVE_AVG_RE = re.compile(r"^1\s*[-—–]\s*\d{1,2}\s*月\s*平均$")
 INDICATOR_ORDER = {
     INDICATORS["new"]: 0,
     INDICATORS["used"]: 1,
+    INDICATORS["new_cat"]: 2,
+    INDICATORS["used_cat"]: 3,
 }
+CATEGORY_INDICATORS = (INDICATORS["new_cat"], INDICATORS["used_cat"])
 CHART_METRICS = ("环比", "同比")
 
 
@@ -85,7 +96,12 @@ def normalize_metric_name(metric: str) -> Optional[str]:
     key = compact(metric).lower()
     if not key:
         return None
-    return METRIC_ALIAS_LOOKUP.get(key)
+    if key in METRIC_ALIAS_LOOKUP:
+        return METRIC_ALIAS_LOOKUP[key]
+    # 表头形如 "1-6月平均" / "1—12月平均"，归一化为 累计平均
+    if CUMULATIVE_AVG_RE.match(normalize(metric)):
+        return "累计平均"
+    return None
 
 
 def normalize_city_name(city: str) -> str:
@@ -134,7 +150,10 @@ def parse_period(title: str) -> Optional[str]:
 
 
 def fetch_url(url: str, timeout: int = None) -> bytes:
-    """获取 URL 内容，支持重试。"""
+    """获取 URL 内容，支持重试。4xx（除 429）视为硬失败不重试。"""
+    if not DEPS_AVAILABLE:
+        raise NetworkError(DEPS_ERROR or "缺少依赖包", url=url)
+
     if timeout is None:
         timeout = REQUEST_CONFIG["timeout"]
 
@@ -144,8 +163,10 @@ def fetch_url(url: str, timeout: int = None) -> bytes:
         if cached:
             return cached
 
+    max_attempts = REQUEST_CONFIG["max_attempts"]
+    retry_delays = REQUEST_CONFIG["retry_delays"]
     last_err = None
-    for attempt in range(REQUEST_CONFIG["max_attempts"]):
+    for attempt in range(max_attempts):
         try:
             response = requests.get(
                 normalized_url,
@@ -159,8 +180,15 @@ def fetch_url(url: str, timeout: int = None) -> bytes:
             return content
         except Exception as exc:
             last_err = exc
-            if attempt < len(REQUEST_CONFIG["retry_delays"]):
-                time.sleep(REQUEST_CONFIG["retry_delays"][attempt])
+            status_code = getattr(getattr(exc, "response", None), "status_code", None)
+            # 4xx（除 429 限流）为硬失败，重试无意义且加重反爬风险
+            if status_code is not None and 400 <= status_code < 500 and status_code != 429:
+                raise NetworkError(
+                    f"网络请求失败: {last_err}", url=normalized_url, status_code=status_code
+                )
+            if attempt < max_attempts - 1:
+                delay_index = min(attempt, len(retry_delays) - 1)
+                time.sleep(retry_delays[delay_index])
 
     raise NetworkError(f"网络请求失败: {last_err}", url=normalized_url)
 
@@ -211,21 +239,129 @@ def contains_category(cells: List[str]) -> bool:
 
 
 def detect_indicator(table, preceding_text: List[str]) -> Optional[str]:
-    """检测表格对应的指标类型。"""
+    """检测表格对应的指标类型。分类表优先匹配（表3/表4），再看总指数表（表1/表2）。"""
+    ordered = [
+        (INDICATORS["new_cat"], None),
+        (INDICATORS["used_cat"], None),
+        (INDICATORS["new"], INDICATORS["new_cat"]),
+        (INDICATORS["used"], INDICATORS["used_cat"]),
+    ]
+
     for text in reversed(preceding_text):
         normalized_text = compact(text)
-        if compact(INDICATORS["new"]) in normalized_text and compact(INDICATORS["new_cat"]) not in normalized_text:
-            return INDICATORS["new"]
-        if compact(INDICATORS["used"]) in normalized_text and compact(INDICATORS["used_cat"]) not in normalized_text:
-            return INDICATORS["used"]
+        for indicator, exclude in ordered:
+            if compact(indicator) in normalized_text and (exclude is None or compact(exclude) not in normalized_text):
+                return indicator
 
-    rows = table.find_all("tr")[:2]
+    rows = table.find_all("tr")[:3]
     head_text = compact(" ".join(row.get_text() for row in rows))
-    if compact(INDICATORS["new"]) in head_text and compact(INDICATORS["new_cat"]) not in head_text:
-        return INDICATORS["new"]
-    if compact(INDICATORS["used"]) in head_text and compact(INDICATORS["used_cat"]) not in head_text:
-        return INDICATORS["used"]
+    for indicator, exclude in ordered:
+        if compact(indicator) in head_text and (exclude is None or compact(exclude) not in head_text):
+            return indicator
     return None
+
+
+def normalize_category_segment(cell: str) -> Optional[str]:
+    """将分类表表头中的面积段单元格归一化为 AREA_SEGMENTS 中的标准名。"""
+    key = compact(cell).lower().replace("平方米", "m2").replace("㎡", "m2")
+    for segment in AREA_SEGMENTS:
+        if key == compact(segment).lower():
+            return segment
+    return None
+
+
+def parse_category_table(
+    table,
+    indicator: str,
+    period_label: str,
+    source_url: str,
+    target_metrics: Optional[List[str]] = None,
+) -> List[Dict]:
+    """解析表3/表4 面积段分类指数表，返回全城市记录。
+
+    表结构：第 1 行表头（城市 + 三个面积段），第 2 行子表头（环比/同比/1-N月平均 ×3），
+    第 3 行基准说明（上月=100 等），其后为数据行（城市 + 9 个数值）。
+    """
+    rows = [extract_row(tr) for tr in table.find_all("tr")]
+
+    segment_header_index = None
+    segments: List[str] = []
+    for index, row in enumerate(rows):
+        matched = [normalize_category_segment(cell) for cell in row[1:]]
+        if matched and all(matched):
+            segment_header_index = index
+            segments = matched
+            break
+    if segment_header_index is None:
+        return []
+
+    metric_row_index = None
+    metric_names: List[Optional[str]] = []
+    for index in range(segment_header_index + 1, min(segment_header_index + 3, len(rows))):
+        names = [normalize_metric_name(cell) for cell in rows[index]]
+        if any(names):
+            metric_row_index = index
+            metric_names = names
+            break
+    if metric_row_index is None:
+        return []
+
+    # 列规格：子表头按面积段分组排列（如 环比/同比/累计平均 ×3 段），
+    # 第 k 列（0 起）属于第 k // 每段列数 个面积段
+    valid_names = [name for name in metric_names if name]
+    metrics_per_segment = len(valid_names) // len(segments)
+    if metrics_per_segment < 1:
+        return []
+    column_spec: List[Tuple[str, str]] = []
+    for offset, cell_name in enumerate(metric_names):
+        if not cell_name:
+            continue
+        segment_index = offset // metrics_per_segment
+        if segment_index >= len(segments):
+            break
+        column_spec.append((segments[segment_index], cell_name))
+    if not column_spec:
+        return []
+
+    records: Dict[str, Dict] = {}
+    for row in rows[metric_row_index + 1:]:
+        if not row or looks_like_header(row):
+            continue
+        if any("=100" in cell for cell in row):
+            continue
+
+        city_raw = normalize(row[0])
+        city = normalize_city_name(city_raw)
+        if city not in SUPPORTED_CITIES:
+            continue
+
+        metrics: Dict[str, Optional[float]] = {}
+        for offset, value in enumerate(row[1:]):
+            if offset >= len(column_spec):
+                break
+            segment, metric = column_spec[offset]
+            if target_metrics and metric not in target_metrics:
+                continue
+            key = f"{segment}{CATEGORY_METRIC_SEPARATOR}{metric}"
+            metrics[key] = parse_number(value)
+
+        if not any(value is not None for value in metrics.values()):
+            continue
+
+        existing = records.get(city)
+        non_null = sum(1 for value in metrics.values() if value is not None)
+        if existing is None or non_null > sum(
+            1 for value in existing["metrics"].values() if value is not None
+        ):
+            records[city] = {
+                "period": period_label,
+                "city": city,
+                "indicator": indicator,
+                "metrics": metrics,
+                "source_url": source_url,
+            }
+
+    return list(records.values())
 
 
 def extract_row(tr) -> List[str]:
@@ -299,6 +435,8 @@ def extract_city_metrics(
             continue
 
         matched_metrics = [metric for metric in target_metrics if metric in key]
+        if not matched_metrics and CUMULATIVE_AVG_RE.match(key):
+            matched_metrics = [metric for metric in target_metrics if metric == "累计平均"]
         if not matched_metrics:
             continue
 
@@ -351,6 +489,18 @@ def parse_page(
 
         indicator = detect_indicator(table, preceding)
         if not indicator:
+            continue
+
+        if indicator in CATEGORY_INDICATORS:
+            for record in parse_category_table(table, indicator, period_label, source_url, target_metrics):
+                if compact(target_city) not in compact(record["city"]):
+                    continue
+                existing = records.get(record["indicator"])
+                non_null_count = sum(1 for value in record["metrics"].values() if value is not None)
+                if existing is None or non_null_count > sum(
+                    1 for value in existing["metrics"].values() if value is not None
+                ):
+                    records[record["indicator"]] = record
             continue
 
         header = find_header(table)
@@ -560,7 +710,7 @@ def generate_chart(records: List[Dict], city: str, output_path: str = None) -> s
     plt.tight_layout()
 
     if output_path is None:
-        output_file = Path(__file__).resolve().parent.parent / f"{city}_housing_analysis.png"
+        output_file = Path(__file__).resolve().parent.parent / "artifacts" / "charts" / f"{city}_housing_analysis.png"
     else:
         output_file = Path(output_path).expanduser()
     output_file.parent.mkdir(parents=True, exist_ok=True)
@@ -595,6 +745,10 @@ def make_output(
 
 
 def main():
+    if not DEPS_AVAILABLE:
+        print(json.dumps({"error": DEPS_ERROR}, ensure_ascii=False))
+        sys.exit(1)
+
     parser = argparse.ArgumentParser(
         description="获取中国70城住宅价格指数数据",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -671,21 +825,21 @@ def main():
 
     selected_items = rss_items[-1:] if args.latest else rss_items[-args.limit:]
     all_records = []
-    page_failures = 0
+    failed_periods = []
 
     for period_label, url in selected_items:
         try:
             content = fetch_url(url)
-        except NetworkError:
-            page_failures += 1
+        except NetworkError as exc:
+            failed_periods.append({"period": period_label, "url": url, "error": str(exc)})
             continue
 
         records = parse_page(content, period_label, target_city, target_metrics, source_url=url)
         all_records.extend(records)
 
-    if selected_items and page_failures == len(selected_items):
+    if selected_items and len(failed_periods) == len(selected_items):
         error = NetworkError("所有数据详情页请求均失败")
-        print(json.dumps({"error": str(error)}, ensure_ascii=False))
+        print(json.dumps({"error": str(error), "failed_periods": failed_periods}, ensure_ascii=False))
         sys.exit(1)
 
     if not all_records:
@@ -705,6 +859,9 @@ def main():
     all_records = sort_records(all_records)
     matched_city = next((record["city"] for record in all_records if record.get("city")), target_city)
     output = make_output(requested_city, matched_city, target_metrics, all_records, len(selected_items))
+    if failed_periods:
+        output["failed_periods"] = failed_periods
+        output["warnings"] = [f"部分期次抓取失败（{len(failed_periods)}/{len(selected_items)}），时间序列可能有洞"]
 
     if args.chart:
         chart_path = generate_chart(all_records, matched_city, args.output)

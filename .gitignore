@@ -3,3 +3,6 @@ __pycache__/
 .DS_Store
 .clawhub/
 _meta.json
+*.png
+cache/
+output/

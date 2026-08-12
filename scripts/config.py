@@ -41,10 +41,20 @@ METRIC_ALIASES = {
     "环比": ["环比", "环比指数", "月环比", "mom", "MoM"],
     "同比": ["同比", "同比指数", "年同比", "yoy", "YoY"],
     "定基": ["定基", "定基指数", "fixed-base"],
+    "累计平均": ["累计平均", "累计", "平均", "1-本年累计平均", "cumulative"],
 }
 
 # 有效指标列表（用于验证）
 VALID_METRICS = list(METRIC_ALIASES.keys())
+
+# 面积段（表3/表4 分类指数，归一化后的表头写法）
+AREA_SEGMENTS = ["90m2及以下", "90-144m2", "144m2以上"]
+
+# 分类记录 metrics 键格式：{面积段}_{指标}，如 "90m2及以下_环比"
+CATEGORY_METRIC_SEPARATOR = "_"
+
+# 央行 LPR 栏目页
+LPR_URL = "https://www.pbc.gov.cn/zhengcehuobisi/125207/125213/125440/3876551/index.html"
 
 # 请求配置
 REQUEST_CONFIG = {

@@ -14,17 +14,32 @@ import json
 import re
 import sys
 from collections import Counter
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-from bs4 import BeautifulSoup
+try:
+    from bs4 import BeautifulSoup
+
+    DEPS_AVAILABLE = True
+    DEPS_ERROR = None
+except ImportError as _exc:  # pragma: no cover - 依赖缺失环境
+    BeautifulSoup = None
+    DEPS_AVAILABLE = False
+    DEPS_ERROR = f"缺少依赖包（{_exc}），请运行: pip install -r requirements.txt"
 
 import fetch_data
-from config import INDICATORS, SUPPORTED_CITIES, VALID_METRICS
+from config import AREA_SEGMENTS, CATEGORY_METRIC_SEPARATOR, INDICATORS, SUPPORTED_CITIES, VALID_METRICS
 from exceptions import NetworkError, RSSFeedError
 
 PERIOD_PATTERN = re.compile(r"^\d{4}-\d{2}$")
-TARGET_INDICATORS = (INDICATORS["new"], INDICATORS["used"])
+TARGET_INDICATORS = (
+    INDICATORS["new"],
+    INDICATORS["used"],
+    INDICATORS["new_cat"],
+    INDICATORS["used_cat"],
+)
+CATEGORY_INDICATORS = (INDICATORS["new_cat"], INDICATORS["used_cat"])
 
 
 def split_row_segments(header: List[str], row: List[str]) -> List[Tuple[List[str], List[str]]]:
@@ -78,6 +93,8 @@ def extract_segment_record(
         for metric in VALID_METRICS:
             if metric in key:
                 metrics[metric] = fetch_data.parse_number(value)
+        if "累计平均" not in metrics and fetch_data.CUMULATIVE_AVG_RE.match(key):
+            metrics["累计平均"] = fetch_data.parse_number(value)
 
     if not city or city not in SUPPORTED_CITIES:
         return None
@@ -123,6 +140,17 @@ def parse_full_page(content: bytes, period_label: str, source_url: str) -> List[
 
         indicator = fetch_data.detect_indicator(table, preceding)
         if indicator not in TARGET_INDICATORS:
+            continue
+
+        if indicator in CATEGORY_INDICATORS:
+            for record in fetch_data.parse_category_table(table, indicator, period_label, source_url):
+                record_key = (record["city"], record["indicator"])
+                existing = page_records.get(record_key)
+                record_non_null = sum(1 for value in record["metrics"].values() if value is not None)
+                if existing is None or record_non_null > sum(
+                    1 for value in existing["metrics"].values() if value is not None
+                ):
+                    page_records[record_key] = record
             continue
 
         header = fetch_data.find_header(table)
@@ -174,8 +202,13 @@ def validate_record_schema(record: Dict[str, object]) -> List[str]:
     if not isinstance(metrics, dict) or not metrics:
         issues.append("metrics missing or invalid")
     else:
+        is_category = record.get("indicator") in CATEGORY_INDICATORS
         for metric_name, metric_value in metrics.items():
-            if metric_name not in VALID_METRICS:
+            if is_category:
+                segment, _, metric_part = metric_name.partition(CATEGORY_METRIC_SEPARATOR)
+                if segment not in AREA_SEGMENTS or metric_part not in VALID_METRICS:
+                    issues.append(f"invalid category metric key: {metric_name}")
+            elif metric_name not in VALID_METRICS:
                 issues.append(f"invalid metric key: {metric_name}")
             if metric_value is not None and not isinstance(metric_value, (int, float)):
                 issues.append(f"invalid metric value type for {metric_name}: {type(metric_value).__name__}")
@@ -283,6 +316,10 @@ def ensure_parent(path: Path) -> None:
 
 
 def main() -> None:
+    if not DEPS_AVAILABLE:
+        print(json.dumps({"error": DEPS_ERROR}, ensure_ascii=False))
+        sys.exit(1)
+
     parser = argparse.ArgumentParser(description="拉取并校验国家统计局70城住宅价格指数全量数据")
     parser.add_argument(
         "--dataset-output",
@@ -347,9 +384,16 @@ def main() -> None:
     if args.dataset_output:
         dataset_path = Path(args.dataset_output).expanduser()
         ensure_parent(dataset_path)
+        periods = sorted({record["period"] for record in all_records})
         dataset_payload = {
+            "generated_at": datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds"),
             "rss_items": len(rss_items),
+            "pages_fetched": len(page_reports),
+            "period_range": {"first": periods[0], "last": periods[-1]} if periods else None,
+            "latest_period": periods[-1] if periods else None,
+            "fetch_failures": fetch_failures,
             "record_count": len(all_records),
+            "indicators": list(TARGET_INDICATORS),
             "records": all_records,
         }
         dataset_path.write_text(json.dumps(dataset_payload, ensure_ascii=False, indent=2))
