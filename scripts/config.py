@@ -8,6 +8,7 @@ RSS_URL = "https://www.stats.gov.cn/sj/zxfb/rss.xml"
 
 # 公告标题关键字
 TITLE_KEY = "70个大中城市商品住宅销售价格变动情况"
+DEV_TITLE_KEY = "全国房地产市场基本情况"
 
 # 指标名称
 INDICATORS = {
@@ -69,11 +70,13 @@ REQUEST_CONFIG = {
     },
 }
 
-# 缓存配置
+# 缓存配置：type=disk 跨进程生效（历史页永久 + RSS 短 TTL）；type=memory 仅进程内
 CACHE_CONFIG = {
     "enabled": True,
-    "ttl_seconds": 3600,  # 1小时缓存
-    "max_size": 100,
+    "type": "disk",
+    "dir": "cache",
+    "ttl_seconds": 3600,  # 非永久内容的 TTL：1小时
+    "max_size": 100,      # 仅内存缓存使用
 }
 
 # 默认参数

@@ -32,7 +32,7 @@ metadata:
 
 1. 70 城价格指数连续 ≥30 个月（RSS 为滚动窗口，2026-08 实测覆盖 2024-01 至 2026-06），且 城市×月份×指标 非空率 ≥80%；
 2. 表3/表4 面积段分类指数（90m²以下、90—144m²、144m²以上）与主表同期次覆盖；
-3. 开发销售序列 ≥2020-01 起 24 个月以上；
+3. 开发销售序列 ≥2020-01 起 24 个月以上（RSS 窗口内自 2024-02 起可用 `scripts/fetch_dev_stats.py` 自动采集，含全年/上半年标题期次；更早需归档页回溯）；
 4. LPR 自 2019-08 改革以来全序列（可用 `scripts/fetch_lpr.py`）；房贷加权利率/住户中长期贷款/M2 ≥24 个月；
 5. 政策清单覆盖近 30 天可得文件。
 
@@ -73,7 +73,7 @@ metadata:
 ## 执行步骤
 
 ### 0. 检查新数据
-对比本仓库 `artifacts/full-dataset.json` 头部元数据的最新期次与 RSS 当前最新期次：
+对比增量历史库 `artifacts/history/price-index-history.json` 的 `latest_period`（或 `artifacts/full-dataset.json` 头部元数据）与 RSS 当前最新期次：
 - 有新期次、或近 7 天有新增政策 → 执行完整流程；
 - 两者皆无 → 仅更新政策清单与看板政策时间线，其余复用现有数据，并在回复首行明确"本周无新发布数据，仅更新政策"。禁止静默生成与上周完全相同的交付物。
 
@@ -90,7 +90,7 @@ metadata:
 - 利率与信贷（长序列）：1 年期 LPR、5 年期以上 LPR（2019 年 8 月以来全序列）、个人住房贷款加权平均利率（全可得期数）、住户部门中长期贷款当月新增（近 24 个月+）、M2/社融存量与同比（近 24 个月+）。
 - 政策清单：近一个月涉及房地产的政策文件、发布机关、文号、核心表述；标注"限购放松/取消""首付比例""房贷利率下限""保障性住房""城市更新""住房公积金""存量房收储"等关键词。
 
-**数据契约**：步骤 2 必须落盘统一中间文件 `artifacts/run_YYYY-MM-DD.json`，后续步骤 4—7 只读该文件、不再重新抓取。记录最小结构：`{"series_id": "...", "period": "YYYY-MM", "city": "北京"|"全国"|"", "value": 数值, "source_url": "..."}`。series_id 命名约定：`price_{环比|同比|累计}_{新房|二手|90平以下|90_144平|144平以上}`、`dev_{投资|销售面积|销售额|到位资金}_累计同比`、`rate_{lpr1y|lpr5y|房贷加权}`、`credit_{住户中长期贷款新增|M2同比|社融同比}`。
+**数据契约**：步骤 2 必须落盘统一中间文件 `artifacts/run_YYYY-MM-DD.json`，后续步骤 4—7 只读该文件、不再重新抓取。记录最小结构：`{"series_id": "...", "period": "YYYY-MM", "city": "北京"|"全国"|"", "value": 数值, "unit": "亿元"|"万平方米"|"%"|"指数", "source_url": "..."}`。series_id 命名约定（与脚本实际输出一致）：价格指数 `price_{环比|同比|累计平均}_{新房|二手|90平以下|90_144平|144平以上}`（现场实现时使用）；开发销售（`fetch_dev_stats.py` 输出）`dev_{官方指标名}[_{子项}]_累计值|累计同比`（如 `dev_房地产开发投资_住宅_累计同比`），分区序列 `dev_region_{地区}_{投资额|销售面积|销售额}[_住宅]_累计值|累计同比`；利率 `rate_{lpr1y|lpr5y|房贷加权}`（`fetch_lpr.py` 输出 lpr_1y/lpr_5y 字段）；信贷货币 `credit_{住户中长期贷款新增|M2同比|社融同比}`（现场实现时使用）。
 
 ### 3. 多源交叉验证
 - 销售口径：统计局"新建商品房销售额"同比 vs 央行"个人住房贷款新增"同比走势。判定规则：符号相反且差值绝对值 >1.5pp 记为背离，必须提示并分析可能原因（首付比例、提前还贷、利率切换等）；同号但幅度差 >5pp 记为弱背离。
@@ -222,13 +222,18 @@ metadata:
 ## 本地工具链（仓库已有基础）
 
 - `scripts/fetch_data.py`：70 城价格指数查询（`--city` / `--metrics 环比,同比,定基,累计平均` / `--latest` / `--limit N` / `--chart`），主源即国家统计局 RSS；已支持表1/表2 总指数与表3/表4 面积段分类指数
+- `scripts/fetch_dev_stats.py`：全国房地产市场基本情况（开发投资/施工/新开工/竣工/销售/待售面积/到位资金 + 东中西部和东北分区），累计值与累计同比长格式记录（series_id 契约），识别全年/上半年标题期次，支持 `--html-file` 离线模式
 - `scripts/fetch_lpr.py`：央行 LPR 全序列抓取（2019-08 改革以来），支持离线模式
 - `scripts/validate_full_data.py`：RSS 全部期次拉取与交叉校验，可导出全量数据（含元数据：generated_at/期次范围/失败清单）与校验报告（`artifacts/`）
 - `scripts/export_csv.py`：从 `artifacts/full-dataset.json` 导出 UTF-8 BOM 的 CSV 明细
-- `scripts/config.py` / `scripts/cache.py`：城市别名、指标映射、面积段定义、请求与缓存配置
+- `scripts/history_store.py`：增量历史库——把数据集按期次沉淀进 `artifacts/history/price-index-history.json`，RSS 滚出的期次不丢失，官方修订保留旧版本
+- `scripts/parsing.py`：共享解析层（表格定位/前置文本/行提取），fetch_data 与 validate_full_data 共用
+- `scripts/config.py` / `scripts/cache.py`：城市别名、指标映射、面积段定义、请求配置、磁盘缓存（历史页永久缓存 + RSS 短 TTL，跨进程生效）
 - 城市列表、指标说明与城市层级划分见 `references/REFERENCE.md`；依赖安装 `pip install -r requirements.txt`（图表等可选依赖见 `requirements-optional.txt`）
 
-待沉淀（尚未脚本化，目前按执行步骤现场实现）：开发销售全序列（投资/销售/待售面积/到位资金，注意累计同比差分陷阱）、房贷加权平均利率、信贷收支、M2/社融、政策清单、2020—2023 归档页回溯与增量历史库。每次运行后若新增了可复用脚本，应收编进 `scripts/` 并更新本节。
+例行运行建议顺序：`validate_full_data.py`（--dataset-output/--report-output）→ `history_store.py --from artifacts/full-dataset.json` → `fetch_dev_stats.py` → `fetch_lpr.py` → `export_csv.py`。
+
+待沉淀（尚未脚本化，目前按执行步骤现场实现）：房贷加权平均利率、住户中长期贷款、M2/社融（央行其余序列）、政策清单、2020—2023 归档页回溯。每次运行后若新增了可复用脚本，应收编进 `scripts/` 并更新本节。
 
 ## 参考资料
 

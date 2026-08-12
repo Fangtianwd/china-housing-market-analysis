@@ -1,4 +1,6 @@
 import sys
+import json
+import subprocess
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -132,6 +134,52 @@ class FetchUrlRetryTests(unittest.TestCase):
                         fetch_data.fetch_url("https://example.com/error")
 
         self.assertEqual(get_mock.call_count, fetch_data.REQUEST_CONFIG["max_attempts"])
+
+
+@unittest.skipUnless(fetch_data.DEPS_AVAILABLE, fetch_data.DEPS_ERROR or "缺少依赖")
+class EdgeCaseTests(unittest.TestCase):
+    def test_parse_number_boundaries(self):
+        self.assertIsNone(fetch_data.parse_number("-"))
+        self.assertIsNone(fetch_data.parse_number("--"))
+        self.assertIsNone(fetch_data.parse_number(""))
+        self.assertIsNone(fetch_data.parse_number("无法解析"))
+        self.assertEqual(fetch_data.parse_number("1,234.5"), 1234.5)
+        self.assertEqual(fetch_data.parse_number("1，234.5"), 1234.5)
+        self.assertEqual(fetch_data.parse_number("99.9%"), 99.9)
+        self.assertEqual(fetch_data.parse_number("-18.0"), -18.0)
+
+    def test_parse_period_variants(self):
+        self.assertEqual(fetch_data.parse_period("2025年12月份70个大中城市商品住宅销售价格变动情况"), "2025-12")
+        self.assertEqual(fetch_data.parse_period("2025年1月70个大中城市商品住宅销售价格变动情况"), "2025-01")
+        self.assertEqual(fetch_data.parse_period("2025 年 12 月 份"), "2025-12")
+        self.assertIsNone(fetch_data.parse_period("标题中没有期次"))
+
+    def test_validate_params_error_branches(self):
+        _, _, error = fetch_data.validate_params("不存在的城", ["环比"], 10)
+        self.assertIn("未在70个大中城市列表中", error)
+
+        _, _, error = fetch_data.validate_params("北京", ["无效指标"], 10)
+        self.assertIn("无效指标", error)
+
+        _, _, error = fetch_data.validate_params("北京", [], 10)
+        self.assertIn("至少需要一个有效指标", error)
+
+        _, _, error = fetch_data.validate_params("北京", ["环比"], 0)
+        self.assertIn("limit", error)
+
+    def test_cli_invalid_city_returns_json_error_offline(self):
+        # 参数校验发生在任何网络请求之前，离线可端到端测试
+        script = Path(__file__).resolve().parents[1] / "scripts" / "fetch_data.py"
+        result = subprocess.run(
+            [sys.executable, str(script), "--city", "不存在的城", "--metrics", "环比"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        self.assertEqual(result.returncode, 1)
+        payload = json.loads(result.stdout)
+        self.assertIn("error", payload)
+        self.assertIn("hint", payload)
 
 
 if __name__ == "__main__":

@@ -238,7 +238,7 @@ def main() -> None:
         for period in sorted(by_period):
             entry = by_period[period]
             try:
-                content = fetch_data.fetch_url(entry["url"])
+                content = fetch_data.fetch_url(entry["url"], cache_permanent=True)
             except NetworkError as exc:
                 warnings.append(f"{period} 详情页抓取失败: {exc}")
                 records.append({

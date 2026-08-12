@@ -114,29 +114,12 @@ def parse_full_page(content: bytes, period_label: str, source_url: str) -> List[
     """独立解析单期页面中的全量 70 城数据。"""
     soup = BeautifulSoup(content, "html.parser")
 
-    tables = soup.select(".detail-text-content .txt-content .trs_editor_view table")
-    if not tables:
-        tables = soup.select(".trs_editor_view table")
-    if not tables:
-        tables = soup.find_all("table")
+    tables = fetch_data.find_content_tables(soup)
 
     page_records: Dict[Tuple[str, str], Dict[str, object]] = {}
 
     for table in tables:
-        preceding = []
-        node = table
-        for _ in range(4):
-            count = 0
-            for sibling in node.find_previous_siblings():
-                text = fetch_data.normalize(sibling.get_text())
-                if text:
-                    preceding.insert(0, text)
-                    count += 1
-                    if count >= 4:
-                        break
-            node = node.parent
-            if node is None:
-                break
+        preceding = fetch_data.collect_preceding_text(table)
 
         indicator = fetch_data.detect_indicator(table, preceding)
         if indicator not in TARGET_INDICATORS:
@@ -290,9 +273,12 @@ def validate_page_records(
             city: [record for record in full_records if record["city"] == city]
             for city in SUPPORTED_CITIES
         }
+        targeted_soup = BeautifulSoup(content, "html.parser")
         for city in SUPPORTED_CITIES:
             expected_records = grouped_full.get(city, [])
-            actual_records = fetch_data.parse_page(content, period_label, city, VALID_METRICS, source_url=url)
+            actual_records = fetch_data.parse_page_from_soup(
+                targeted_soup, period_label, city, VALID_METRICS, source_url=url
+            )
             comparison_issues = compare_records(expected_records, actual_records)
             if comparison_issues:
                 targeted_mismatches.append({
@@ -354,7 +340,7 @@ def main() -> None:
 
     for period_label, url in rss_items:
         try:
-            content = fetch_data.fetch_url(url)
+            content = fetch_data.fetch_url(url, cache_permanent=True)
         except NetworkError as exc:
             fetch_failures.append({
                 "period": period_label,
@@ -396,13 +382,13 @@ def main() -> None:
             "indicators": list(TARGET_INDICATORS),
             "records": all_records,
         }
-        dataset_path.write_text(json.dumps(dataset_payload, ensure_ascii=False, indent=2))
+        dataset_path.write_text(json.dumps(dataset_payload, ensure_ascii=False, indent=2), encoding="utf-8")
         report["dataset_output"] = str(dataset_path)
 
     if args.report_output:
         report_path = Path(args.report_output).expanduser()
         ensure_parent(report_path)
-        report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2))
+        report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
         report["report_output"] = str(report_path)
 
     print(json.dumps(report, ensure_ascii=False, indent=2))

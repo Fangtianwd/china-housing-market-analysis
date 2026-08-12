@@ -29,7 +29,7 @@ except ImportError as _exc:  # pragma: no cover - 依赖缺失环境
     DEPS_AVAILABLE = False
     DEPS_ERROR = f"缺少依赖包（{_exc}），请运行: pip install -r requirements.txt"
 
-from cache import SimpleCache
+from cache import DiskCache, SimpleCache
 from config import (
     AREA_SEGMENTS,
     CACHE_CONFIG,
@@ -45,11 +45,31 @@ from config import (
     VALID_METRICS,
 )
 from exceptions import CityNotFoundError, DataUnavailableError, NetworkError, RSSFeedError
+from parsing import (  # noqa: F401 - 共享解析层，fetch_data.* 兼容导出
+    collect_preceding_text,
+    compact,
+    extract_row,
+    find_content_tables,
+    find_header,
+    looks_like_header,
+    normalize,
+)
 
-_cache = SimpleCache(
-    max_size=CACHE_CONFIG["max_size"],
-    ttl_seconds=CACHE_CONFIG["ttl_seconds"],
-) if CACHE_CONFIG["enabled"] else None
+
+def build_cache():
+    """按配置构建缓存（磁盘缓存跨进程生效，内存缓存仅测试用途）。"""
+    if not CACHE_CONFIG["enabled"]:
+        return None
+    if CACHE_CONFIG.get("type") == "disk":
+        cache_dir = Path(__file__).resolve().parent.parent / CACHE_CONFIG.get("dir", "cache")
+        return DiskCache(cache_dir=cache_dir, ttl_seconds=CACHE_CONFIG["ttl_seconds"])
+    return SimpleCache(
+        max_size=CACHE_CONFIG["max_size"],
+        ttl_seconds=CACHE_CONFIG["ttl_seconds"],
+    )
+
+
+_cache = build_cache()
 
 PERIOD_RE = re.compile(r"(\d{4})\s*年\s*(\d{1,2})\s*月(?:份)?")
 CUMULATIVE_AVG_RE = re.compile(r"^1\s*[-—–]\s*\d{1,2}\s*月\s*平均$")
@@ -61,21 +81,6 @@ INDICATOR_ORDER = {
 }
 CATEGORY_INDICATORS = (INDICATORS["new_cat"], INDICATORS["used_cat"])
 CHART_METRICS = ("环比", "同比")
-
-
-def normalize(s: str) -> str:
-    """规范化字符串。"""
-    import html as html_mod
-
-    s = html_mod.unescape(str(s))
-    s = s.replace("\u00a0", " ").replace("\u3000", " ")
-    s = s.replace("\t", " ").replace("\n", " ").replace("\r", " ")
-    return " ".join(s.split())
-
-
-def compact(s: str) -> str:
-    """移除所有空白。"""
-    return "".join(normalize(s).split())
 
 
 def build_metric_alias_lookup() -> Dict[str, str]:
@@ -149,8 +154,12 @@ def parse_period(title: str) -> Optional[str]:
     return f"{year:04d}-{month:02d}"
 
 
-def fetch_url(url: str, timeout: int = None) -> bytes:
-    """获取 URL 内容，支持重试。4xx（除 429）视为硬失败不重试。"""
+def fetch_url(url: str, timeout: int = None, cache_permanent: bool = False) -> bytes:
+    """获取 URL 内容，支持重试与磁盘缓存。
+
+    cache_permanent=True 用于发布后不再变化的历史公告页（永久缓存）；
+    RSS 等会更新的内容保持 TTL 缓存。4xx（除 429）视为硬失败不重试。
+    """
     if not DEPS_AVAILABLE:
         raise NetworkError(DEPS_ERROR or "缺少依赖包", url=url)
 
@@ -160,7 +169,7 @@ def fetch_url(url: str, timeout: int = None) -> bytes:
     normalized_url = url.strip()
     if _cache:
         cached = _cache.get(normalized_url)
-        if cached:
+        if cached is not None:
             return cached
 
     max_attempts = REQUEST_CONFIG["max_attempts"]
@@ -176,7 +185,7 @@ def fetch_url(url: str, timeout: int = None) -> bytes:
             response.raise_for_status()
             content = response.content
             if _cache:
-                _cache.set(normalized_url, content)
+                _cache.set(normalized_url, content, permanent=cache_permanent)
             return content
         except Exception as exc:
             last_err = exc
@@ -222,15 +231,6 @@ def fetch_rss_items() -> List[Tuple[str, str]]:
 
     items.sort(key=lambda item: item[0])
     return items
-
-
-def looks_like_header(cells: List[str]) -> bool:
-    """判断是否为表头行。"""
-    for cell in cells:
-        value = normalize(cell)
-        if any(keyword in value for keyword in ("城市", "环比", "同比", "定基")):
-            return True
-    return False
 
 
 def contains_category(cells: List[str]) -> bool:
@@ -364,20 +364,6 @@ def parse_category_table(
     return list(records.values())
 
 
-def extract_row(tr) -> List[str]:
-    """提取表格行文本。"""
-    return [normalize(cell.get_text()) for cell in tr.find_all(["th", "td"]) if normalize(cell.get_text())]
-
-
-def find_header(table) -> List[str]:
-    """查找表头行。"""
-    for tr in table.find_all("tr"):
-        row = extract_row(tr)
-        if row and looks_like_header(row):
-            return row
-    return []
-
-
 def pick_city_segment(
     row: List[str],
     header: List[str],
@@ -460,32 +446,25 @@ def parse_page(
     target_metrics: List[str],
     source_url: str = "",
 ) -> List[Dict]:
-    """解析文章页面。"""
+    """解析文章页面（bytes 入口）。"""
     soup = BeautifulSoup(content, "html.parser")
+    return parse_page_from_soup(soup, period_label, target_city, target_metrics, source_url)
 
-    tables = soup.select(".detail-text-content .txt-content .trs_editor_view table")
-    if not tables:
-        tables = soup.select(".trs_editor_view table")
-    if not tables:
-        tables = soup.find_all("table")
+
+def parse_page_from_soup(
+    soup,
+    period_label: str,
+    target_city: str,
+    target_metrics: List[str],
+    source_url: str = "",
+) -> List[Dict]:
+    """解析已构建的 soup（供批量按城市解析时复用，避免重复构建 soup）。"""
+    tables = find_content_tables(soup)
 
     records = {}
 
     for table in tables:
-        preceding = []
-        node = table
-        for _ in range(4):
-            count = 0
-            for sibling in node.find_previous_siblings():
-                text = normalize(sibling.get_text())
-                if text:
-                    preceding.insert(0, text)
-                    count += 1
-                    if count >= 4:
-                        break
-            node = node.parent
-            if node is None:
-                break
+        preceding = collect_preceding_text(table)
 
         indicator = detect_indicator(table, preceding)
         if not indicator:
@@ -829,7 +808,7 @@ def main():
 
     for period_label, url in selected_items:
         try:
-            content = fetch_url(url)
+            content = fetch_url(url, cache_permanent=True)
         except NetworkError as exc:
             failed_periods.append({"period": period_label, "url": url, "error": str(exc)})
             continue
