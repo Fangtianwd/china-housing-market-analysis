@@ -224,6 +224,9 @@ metadata:
 - `scripts/fetch_data.py`：70 城价格指数查询（`--city` / `--metrics 环比,同比,定基,累计平均` / `--latest` / `--limit N` / `--chart`），主源即国家统计局 RSS；已支持表1/表2 总指数与表3/表4 面积段分类指数
 - `scripts/fetch_dev_stats.py`：全国房地产市场基本情况（开发投资/施工/新开工/竣工/销售/待售面积/到位资金 + 东中西部和东北分区），累计值与累计同比长格式记录（series_id 契约），识别全年/上半年标题期次，支持 `--html-file` 离线模式
 - `scripts/fetch_lpr.py`：央行 LPR 全序列抓取（2019-08 改革以来），支持离线模式
+- `scripts/fetch_pbc.py`：央行个人住房贷款加权平均利率季度序列（静态栏目 2024-Q3 起；更早需从货币政策执行报告补采）
+- `scripts/fetch_archive.py`：统计局归档页回溯 RSS 窗口外的价格指数期次（实测覆盖 2021-08 起），产出数据集供 history_store 沉淀。非常例步骤：仅在历史库缺失早期段、或需校验/重采早期数据时运行
+- `scripts/fetch_policies.py`：住建部最新政策清单（首页快照 + 文章页日期 + 关键词标签）；国务院层面政策仍需 WebSearch（gov.cn 直抓 403）
 - `scripts/validate_full_data.py`：RSS 全部期次拉取与交叉校验，可导出全量数据（含元数据：generated_at/期次范围/失败清单）与校验报告（`artifacts/`）
 - `scripts/export_csv.py`：从 `artifacts/full-dataset.json` 导出 UTF-8 BOM 的 CSV 明细
 - `scripts/history_store.py`：增量历史库——把数据集按期次沉淀进 `artifacts/history/price-index-history.json`，RSS 滚出的期次不丢失，官方修订保留旧版本
@@ -231,9 +234,12 @@ metadata:
 - `scripts/config.py` / `scripts/cache.py`：城市别名、指标映射、面积段定义、请求配置、磁盘缓存（历史页永久缓存 + RSS 短 TTL，跨进程生效）
 - 城市列表、指标说明与城市层级划分见 `references/REFERENCE.md`；依赖安装 `pip install -r requirements.txt`（图表等可选依赖见 `requirements-optional.txt`）
 
-例行运行建议顺序：`validate_full_data.py`（--dataset-output/--report-output）→ `history_store.py --from artifacts/full-dataset.json` → `fetch_dev_stats.py` → `fetch_lpr.py` → `export_csv.py`。
+例行运行建议顺序：`validate_full_data.py`（--dataset-output/--report-output）→ `history_store.py --from artifacts/full-dataset.json` → `fetch_dev_stats.py` → `fetch_lpr.py` → `fetch_pbc.py` → `fetch_policies.py` → `export_csv.py`。
 
-待沉淀（尚未脚本化，目前按执行步骤现场实现）：房贷加权平均利率、住户中长期贷款、M2/社融（央行其余序列）、政策清单、2020—2023 归档页回溯。每次运行后若新增了可复用脚本，应收编进 `scripts/` 并更新本节。
+待沉淀（尚未脚本化，目前按执行步骤现场实现）：
+- 2020-01 至 2021-07 价格指数补采（超出归档覆盖，需 data.stats.gov.cn 在线查询或人工，见 KNOWN_BREAKS.md）
+- 央行住户中长期贷款、M2/社融序列（现站点为 JS 动态页面，无静态列表，按兜底规则 WebSearch 处理）
+- 每次运行后若新增了可复用脚本，应收编进 `scripts/` 并更新本节。
 
 ## 参考资料
 

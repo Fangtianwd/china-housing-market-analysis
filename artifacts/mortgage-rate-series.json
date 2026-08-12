@@ -1,0 +1,62 @@
+{
+  "source_url": "https://www.pbc.gov.cn/zhengcehuobisi/125207/125213/125440/125838/5470606/index.html",
+  "series_id": "rate_房贷加权",
+  "frequency": "quarterly",
+  "generated_at": "2026-08-13T07:29:27+08:00",
+  "period_count": 8,
+  "period_range": {
+    "first": "2024-Q3",
+    "last": "2026-Q2"
+  },
+  "warnings": [],
+  "records": [
+    {
+      "period": "2024-Q3",
+      "date": "2024-10-31",
+      "rate": 3.33,
+      "source_url": "https://www.pbc.gov.cn/zhengcehuobisi/125207/125213/125440/125838/5470606/5492899/index.html"
+    },
+    {
+      "period": "2024-Q4",
+      "date": "2025-01-24",
+      "rate": 3.1,
+      "source_url": "https://www.pbc.gov.cn/zhengcehuobisi/125207/125213/125440/125838/5470606/5576357/index.html"
+    },
+    {
+      "period": "2025-Q1",
+      "date": "2025-04-29",
+      "rate": 3.11,
+      "source_url": "https://www.pbc.gov.cn/zhengcehuobisi/125207/125213/125440/125838/5470606/5693758/index.html"
+    },
+    {
+      "period": "2025-Q2",
+      "date": "2025-07-30",
+      "rate": 3.09,
+      "source_url": "https://www.pbc.gov.cn/zhengcehuobisi/125207/125213/125440/125838/5470606/5795573/index.html"
+    },
+    {
+      "period": "2025-Q3",
+      "date": "2025-10-30",
+      "rate": 3.07,
+      "source_url": "https://www.pbc.gov.cn/zhengcehuobisi/125207/125213/125440/125838/5470606/2025111413250961611/index.html"
+    },
+    {
+      "period": "2025-Q4",
+      "date": "2026-01-29",
+      "rate": 3.06,
+      "source_url": "https://www.pbc.gov.cn/zhengcehuobisi/125207/125213/125440/125838/5470606/2026012916001135574/index.html"
+    },
+    {
+      "period": "2026-Q1",
+      "date": "2026-04-30",
+      "rate": 3.06,
+      "source_url": "https://www.pbc.gov.cn/zhengcehuobisi/125207/125213/125440/125838/5470606/2026050617591287844/index.html"
+    },
+    {
+      "period": "2026-Q2",
+      "date": "2026-07-31",
+      "rate": 3.06,
+      "source_url": "https://www.pbc.gov.cn/zhengcehuobisi/125207/125213/125440/125838/5470606/2026073117132450967/index.html"
+    }
+  ]
+}
