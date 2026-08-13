@@ -76,3 +76,50 @@ class PbcRateTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PbcReportTests(unittest.TestCase):
+    REPORT_LISTING = """
+    <html><body>
+    <a href="7/125957/4883187/cd2196ad2fdf454a9207100c4acff45e/index.html"
+       title="2023年第四季度中国货币政策执行报告">2023Q4</a>
+    <a href="7/125957/4584071/d7e45aa7d98c4664a9a6c2393d16787d/index.html"
+       title="2022年第四季度中国货币政策执行报告">2022Q4</a>
+    <a href="/125207/125227/125957/5347949/2025100917195573922/index.html"
+       title="2024年第一季度中国货币政策执行报告">2024Q1</a>
+    <a href="https://other.example.cn/report.html"
+       title="2021年第一季度中国货币政策执行报告">2021Q1</a>
+    <a href="something/else.html" title="《中国货币政策执行报告》简介">简介(跳过)</a>
+    <a href="other.html" title="其他公告">无关</a>
+    </body></html>
+    """.encode("utf-8")
+
+    def test_parse_report_listing_extracts_all_reports(self):
+        entries = fetch_pbc.parse_report_listing(self.REPORT_LISTING)
+        self.assertEqual(len(entries), 4)  # 4 个报告，简介被跳过
+        self.assertEqual(entries["2023-Q4"]["period"], "2023-Q4")
+        self.assertEqual(entries["2023-Q4"]["title"], "2023年第四季度中国货币政策执行报告")
+        self.assertTrue(entries["2023-Q4"]["url"].startswith("https://www.pbc.gov.cn/"))
+        self.assertIn("cd2196ad2fdf454a9207100c4acff45e", entries["2023-Q4"]["url"])
+
+    def test_parse_report_rate_extracts_value(self):
+        html = "<html><body>个人住房贷款加权平均利率为3.97%</body></html>".encode("utf-8")
+        parsed = fetch_pbc.parse_report_rate(html)
+        self.assertEqual(parsed["rate"], 3.97)
+        self.assertEqual(parsed["warnings"], [])
+
+    def test_parse_report_rate_handles_fenbie_format(self):
+        html = "<html><body>个人住房贷款加权平均利率分别为3.82%、4.02%</body></html>".encode("utf-8")
+        parsed = fetch_pbc.parse_report_rate(html)
+        self.assertEqual(parsed["rate"], 3.82)
+
+    def test_parse_report_rate_handles_2022q4_format(self):
+        html = "<html><body>住房贷款利率平均为4.26%</body></html>".encode("utf-8")
+        parsed = fetch_pbc.parse_report_rate(html)
+        self.assertEqual(parsed["rate"], 4.26)
+
+    def test_parse_report_rate_warns_on_missing(self):
+        html = "<html><body>无数据</body></html>".encode("utf-8")
+        parsed = fetch_pbc.parse_report_rate(html)
+        self.assertIsNone(parsed["rate"])
+        self.assertTrue(parsed["warnings"])

@@ -2,14 +2,56 @@
   "source_url": "https://www.pbc.gov.cn/zhengcehuobisi/125207/125213/125440/125838/5470606/index.html",
   "series_id": "rate_房贷加权",
   "frequency": "quarterly",
-  "generated_at": "2026-08-13T07:29:27+08:00",
-  "period_count": 8,
+  "generated_at": "2026-08-13T21:38:44+08:00",
+  "period_count": 15,
   "period_range": {
-    "first": "2024-Q3",
+    "first": "2022-Q4",
     "last": "2026-Q2"
   },
   "warnings": [],
   "records": [
+    {
+      "period": "2022-Q4",
+      "date": null,
+      "rate": 4.26,
+      "source_url": "https://www.pbc.gov.cn/zhengcehuobisi/125207/125227/125957/4584071/d7e45aa7d98c4664a9a6c2393d16787d/index.html"
+    },
+    {
+      "period": "2023-Q1",
+      "date": null,
+      "rate": 4.14,
+      "source_url": "https://www.pbc.gov.cn/zhengcehuobisi/125207/125227/125957/4883187/487332be0c8c434aa096b8f5b8c9d66d/index.html"
+    },
+    {
+      "period": "2023-Q2",
+      "date": null,
+      "rate": 3.95,
+      "source_url": "https://www.pbc.gov.cn/zhengcehuobisi/125207/125227/125957/4883187/e6dc129d48d9474cb6455691eee05766/index.html"
+    },
+    {
+      "period": "2023-Q3",
+      "date": null,
+      "rate": 3.82,
+      "source_url": "https://www.pbc.gov.cn/zhengcehuobisi/125207/125227/125957/4883187/1f14dbe28ec4408cbf45cee06f86808a/index.html"
+    },
+    {
+      "period": "2023-Q4",
+      "date": null,
+      "rate": 3.97,
+      "source_url": "https://www.pbc.gov.cn/zhengcehuobisi/125207/125227/125957/4883187/cd2196ad2fdf454a9207100c4acff45e/index.html"
+    },
+    {
+      "period": "2024-Q1",
+      "date": null,
+      "rate": null,
+      "source_url": "https://www.pbc.gov.cn/zhengcehuobisi/125207/125227/125957/5347949/4fcccad1c1b342c18c1832aa7469cac1/index.html"
+    },
+    {
+      "period": "2024-Q2",
+      "date": null,
+      "rate": null,
+      "source_url": "https://www.pbc.gov.cn/zhengcehuobisi/125207/125227/125957/5347949/2025100917195573922/index.html"
+    },
     {
       "period": "2024-Q3",
       "date": "2024-10-31",
